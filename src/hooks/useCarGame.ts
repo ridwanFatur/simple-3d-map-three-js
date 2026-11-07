@@ -227,6 +227,8 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
         if (RENDER_FLOOR && groundMaterial.map) {
           groundMaterial.map.colorSpace = THREE.SRGBColorSpace;
+          groundMaterial.map.repeat.y = -1;
+          groundMaterial.map.offset.y = 1;
         }
 
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(c.width, c.height), groundMaterial);
