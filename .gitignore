@@ -1,0 +1,4 @@
+dist/
+node_modules/
+map_objects/
+public/map_objects

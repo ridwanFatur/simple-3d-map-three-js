@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/components/Game/Game.tsx","./src/components/Game/GameHud.tsx","./src/components/Game/MiniMapCanvas.tsx","./src/components/Game/Speedometer.tsx","./src/components/Game/index.ts","./src/constants/index.ts","./src/hooks/useCarGame.ts","./src/types/index.ts"],"version":"5.9.3"}
