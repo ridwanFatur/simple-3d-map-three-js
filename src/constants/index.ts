@@ -7,10 +7,11 @@ export const CHUNK_CHECK_INTERVAL = 0.2;
 export const USE_FOG = true;
 
 export const MINI_MAP_WIDTH = 60;
-export const MINI_MAP_HEIGHT = 80;
+export const MINI_MAP_HEIGHT = 60;
 export const MINI_MAP_SCALE = 3;
+export const MINI_ZOOM = 0.2;
 export const MINI_ZOOM_MIN = 0.1;
-export const MINI_ZOOM_MAX = 12;
+export const MINI_ZOOM_MAX = 1;
 export const MINI_ZOOM_SPEED = 1.2;
 export const MINI_MAP_ROTATE = true;
 

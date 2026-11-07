@@ -13,6 +13,7 @@ import {
   MINI_MAP_ROTATE,
   MINI_MAP_SCALE,
   MINI_MAP_WIDTH,
+  MINI_ZOOM,
   MINI_ZOOM_MAX,
   MINI_ZOOM_MIN,
   MINI_ZOOM_SPEED,
@@ -328,7 +329,7 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
     const miniCtx = minimap.getContext('2d');
     if (!miniCtx) return;
 
-    let miniZoom = MINI_MAP_SCALE;
+    let miniZoom = MINI_ZOOM;
 
     const keys = new Set<string>();
     let topView = false;
