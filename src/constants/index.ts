@@ -45,6 +45,16 @@ export const CAR = {
   turnRate: 2.2,
 } as const;
 
+export const CAR_MODEL_CONFIG = {
+  modelPath: '/models/car.glb',
+  shadowPath: '/models/car_ao.png',
+  dracoPath: '/draco/',
+  scale: 8.85,
+  wheelRadius: 3.17,
+  maxSteerAngle: 0.38,
+  steerLerpSpeed: 14,
+} as const;
+
 export const CHASE = { distance: 130, height: 70, lookAhead: 40, smooth: 5 } as const;
 export const TOP_HEIGHT = 700;
 
