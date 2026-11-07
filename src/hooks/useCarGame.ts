@@ -28,6 +28,24 @@ import {
 } from '../constants';
 import type { CarState, MapMeta, Obstacle, RuntimeChunk } from '../types';
 
+/**
+ * KONVENSI KOORDINAT
+ *
+ * Data map (chunk.x/y, shapes, spawn, posisi mobil) memakai konvensi gambar:
+ * x ke kanan, y ke BAWAH (y kecil = bagian atas gambar).
+ *
+ * Dulu dunia 3D dipetakan z = -y lalu tekstur lantai di-flip supaya "pas".
+ * Itu me-mirror seluruh dunia, makanya tulisan di gambar (mis. "Ridwan")
+ * kebalik. Sekarang dunia 3D dipetakan z = +y, jadi:
+ *   - tekstur lantai TIDAK perlu di-flip, gambar tegak,
+ *   - minimap tidak perlu scale(S, -S), gambar langsung di-draw apa adanya.
+ *
+ * GLB sebelumnya cocok dengan z = -y, jadi sekarang di-mirror di sumbu z
+ * supaya tetap pas dengan data map. Kalau GLB kamu ternyata sudah cocok
+ * dengan z = +y, set flag ini ke false.
+ */
+const GLB_MIRROR_Z = true;
+
 function unloadDistance() {
   return CHUNK_LOAD_DISTANCE + CHUNK_UNLOAD_MARGIN;
 }
@@ -62,10 +80,10 @@ function makeGrid(c: RuntimeChunk, step = 50) {
   const points: number[] = [];
   const y = 0.05;
   for (let gx = 0; gx <= c.width; gx += step) {
-    points.push(c.x + gx, y, -c.y, c.x + gx, y, -(c.y + c.height));
+    points.push(c.x + gx, y, c.y, c.x + gx, y, c.y + c.height);
   }
   for (let gy = 0; gy <= c.height; gy += step) {
-    points.push(c.x, y, -(c.y + gy), c.x + c.width, y, -(c.y + gy));
+    points.push(c.x, y, c.y + gy, c.x + c.width, y, c.y + gy);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
@@ -132,7 +150,7 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
       new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide }),
     );
     spawnMarker.rotation.x = -Math.PI / 2;
-    spawnMarker.position.set(SPAWN.x, 0.2, -SPAWN.y);
+    spawnMarker.position.set(SPAWN.x, 0.2, SPAWN.y);
     scene.add(spawnMarker);
 
     const carGroup = new THREE.Group();
@@ -226,19 +244,19 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
           : new THREE.MeshStandardMaterial({ color: 0xdddddd });
 
         if (RENDER_FLOOR && groundMaterial.map) {
+          // Tidak ada flip lagi: bagian atas gambar = y kecil = -z, tegak.
           groundMaterial.map.colorSpace = THREE.SRGBColorSpace;
-          groundMaterial.map.repeat.y = -1;
-          groundMaterial.map.offset.y = 1;
         }
 
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(c.width, c.height), groundMaterial);
         ground.rotation.x = -Math.PI / 2;
-        ground.position.set(c.x + c.width / 2, -0.1, -(c.y + c.height / 2));
+        ground.position.set(c.x + c.width / 2, -0.1, c.y + c.height / 2);
         group.add(ground);
 
         group.add(makeGrid(c));
 
         const obj = gltf.scene;
+        if (GLB_MIRROR_Z) obj.scale.z = -1;
         obj.traverse((child) => {
           const mesh = child as THREE.Mesh;
           if (mesh.isMesh) {
@@ -303,7 +321,7 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
         car.y = SPAWN.y;
         car.heading = SPAWN.heading;
         car.speed = 0;
-        spawnMarker.position.set(SPAWN.x, 0.2, -SPAWN.y);
+        spawnMarker.position.set(SPAWN.x, 0.2, SPAWN.y);
         camInit = false;
       }
 
@@ -379,9 +397,13 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
       miniCtx.save();
       miniCtx.translate(w / 2, h / 2);
-      miniCtx.scale(S, -S);
+      // Canvas y-down sama dengan konvensi data map (y ke bawah),
+      // jadi tidak ada flip dan gambar langsung tegak.
+      miniCtx.scale(S, S);
 
-      if (MINI_MAP_ROTATE) miniCtx.rotate(Math.PI / 2 - car.heading);
+      // Heading mobil di sistem y-down: arah = (cos h, sin h).
+      // Supaya mobil menghadap atas layar (-y), putar sebesar -90° - heading.
+      if (MINI_MAP_ROTATE) miniCtx.rotate(-Math.PI / 2 - car.heading);
 
       miniCtx.translate(-car.x, -car.y);
       miniCtx.imageSmoothingEnabled = true;
@@ -408,7 +430,9 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
       miniCtx.save();
       miniCtx.translate(w / 2, h / 2);
-      if (!MINI_MAP_ROTATE) miniCtx.rotate(Math.PI / 2 - car.heading);
+      // Panah digambar menghadap atas. Kalau map tidak ikut berputar,
+      // putar panahnya sebesar heading + 90°.
+      if (!MINI_MAP_ROTATE) miniCtx.rotate(car.heading + Math.PI / 2);
       miniCtx.beginPath();
       miniCtx.moveTo(0, -10);
       miniCtx.lineTo(7, 8);
@@ -512,7 +536,9 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
       car.speed = Math.max(-CAR.maxReverse, Math.min(CAR.maxSpeed, car.speed));
 
-      const steer = (left ? 1 : 0) - (right ? 1 : 0);
+      // Di sistem y-down, heading naik = putar ke kanan (searah jarum jam),
+      // jadi tanda steer dibalik supaya A/← tetap belok kiri.
+      const steer = (right ? 1 : 0) - (left ? 1 : 0);
       const grip = Math.min(1, Math.abs(car.speed) / 80);
       car.heading += steer * CAR.turnRate * grip * Math.sign(car.speed) * dt;
 
@@ -527,8 +553,9 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
       if (hit) car.speed *= -0.25;
 
-      carGroup.position.set(car.x, 0, -car.y);
-      carGroup.rotation.y = car.heading;
+      carGroup.position.set(car.x, 0, car.y);
+      // Maju mobil = +x lokal; di dunia arahnya (cos h, 0, sin h) => rotation.y = -heading.
+      carGroup.rotation.y = -car.heading;
 
       for (const wheel of wheels) wheel.rotation.z -= (car.speed * dt) / 5;
     };
@@ -538,9 +565,9 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
     const updateCamera = (dt: number) => {
       const fx = Math.cos(car.heading);
-      const fz = -Math.sin(car.heading);
+      const fz = Math.sin(car.heading);
       const cx = car.x;
-      const cz = -car.y;
+      const cz = car.y;
 
       let targetPos: THREE.Vector3;
       let targetLook: THREE.Vector3;
