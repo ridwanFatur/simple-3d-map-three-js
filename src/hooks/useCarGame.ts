@@ -8,8 +8,8 @@ import {
   CHUNK_CHECK_INTERVAL,
   CHUNK_LOAD_DISTANCE,
   CHUNK_UNLOAD_MARGIN,
-  first_chunk,
-  last_chunk,
+  FIRST_CHUNK,
+  LAST_CHUNK,
   MAP_DIR,
   MINI_MAP_HEIGHT,
   MINI_MAP_ROTATE,
@@ -482,8 +482,8 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
       const tX = mapWidth === 0 ? 0 : Math.max(0, Math.min(1, (car.x - mapBounds.minX) / mapWidth));
       const tY = mapHeight === 0 ? 0 : Math.max(0, Math.min(1, (car.y - mapBounds.minY) / mapHeight));
 
-      const latitude = first_chunk.latitude + tY * (last_chunk.latitude - first_chunk.latitude);
-      const longitude = first_chunk.longitude + tX * (last_chunk.longitude - first_chunk.longitude);
+      const latitude = FIRST_CHUNK.latitude + tY * (LAST_CHUNK.latitude - FIRST_CHUNK.latitude);
+      const longitude = FIRST_CHUNK.longitude + tX * (LAST_CHUNK.longitude - FIRST_CHUNK.longitude);
 
       return { latitude, longitude };
     };

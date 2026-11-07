@@ -17,14 +17,14 @@ export const MINI_MAP_ROTATE = true;
 
 export const MAP_DIR = '/map_objects';
 
-export const first_chunk = {
+export const FIRST_CHUNK = {
   latitude: -6.920973741554146,
-  longitude: 107.5836181640625,
+  longitude: 107.58499145507812,
 } as const;
 
-export const last_chunk = {
-  latitude: -6.929153376172391,
-  longitude: 107.59185791015625,
+export const LAST_CHUNK = {
+  latitude: -6.925063576592028, 
+  longitude: 107.589111328125,
 } as const;
 
 export const RENDER_FLOOR = true;
