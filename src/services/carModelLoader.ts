@@ -42,8 +42,6 @@ export async function loadCarModel(parentGroup: THREE.Group): Promise<LoadedCar>
   const gltfLoader = new GLTFLoader();
   gltfLoader.setDRACOLoader(dracoLoader);
 
-  const textureLoader = new THREE.TextureLoader();
-
   try {
     const gltf = await gltfLoader.loadAsync(CAR_MODEL_CONFIG.modelPath);
     const carModel = gltf.scene;
@@ -134,30 +132,6 @@ export async function loadCarModel(parentGroup: THREE.Group): Promise<LoadedCar>
         mat.emissiveIntensity = 0.8;
         taillightsMat = mat;
       }
-    }
-
-    // Ground contact shadow plane
-    let shadowMesh: THREE.Mesh | null = null;
-    try {
-      const shadowTexture = await textureLoader.loadAsync(CAR_MODEL_CONFIG.shadowPath);
-      shadowTexture.colorSpace = THREE.SRGBColorSpace;
-      shadowMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.655 * 4, 1.3 * 4),
-        new THREE.MeshBasicMaterial({
-          map: shadowTexture,
-          blending: THREE.MultiplyBlending,
-          toneMapped: false,
-          transparent: true,
-          opacity: 0.85,
-          depthWrite: false,
-        }),
-      );
-      shadowMesh.rotation.x = -Math.PI / 2;
-      shadowMesh.position.y = 0.01;
-      shadowMesh.renderOrder = 2;
-      carModel.add(shadowMesh);
-    } catch (shadowErr) {
-      console.warn('Could not load car contact shadow texture:', shadowErr);
     }
 
     // Locate wheel nodes

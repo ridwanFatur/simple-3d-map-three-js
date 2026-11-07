@@ -21,6 +21,7 @@ export type MapChunkMeta = {
   height: number;
   glb: string;
   image: string;
+  texture_map?: number[][];
 };
 
 export type MapShape = {
@@ -36,6 +37,7 @@ export type MapMeta = {
   spawn?: Spawn;
   chunks?: MapChunkMeta[];
   shapes?: MapShape[];
+  texture_map?: number[][][][];
 };
 
 export type Obstacle = {

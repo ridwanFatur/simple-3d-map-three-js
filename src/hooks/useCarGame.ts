@@ -1,7 +1,10 @@
 import { type RefObject, useEffect } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { MobileInputState } from '../components/Game/MobileControls';
+import { CarAudio } from '../services/carAudio';
 import { loadCarModel, type LoadedCar } from '../services/carModelLoader';
+import { TerrainManager } from '../services/terrainManager';
 import {
   CAR,
   CAR_TOP,
@@ -112,14 +115,25 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-type UseCarGameArgs = {
+export type UseCarGameArgs = {
   boxRef: RefObject<HTMLDivElement>;
   hudRef: RefObject<HTMLDivElement>;
   speedoRef: RefObject<HTMLDivElement>;
   minimapRef: RefObject<HTMLCanvasElement>;
+  mobileInputRef?: RefObject<MobileInputState>;
+  onCamToggleRef?: React.MutableRefObject<(() => void) | null>;
+  onResetRef?: React.MutableRefObject<(() => void) | null>;
 };
 
-export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGameArgs) {
+export function useCarGame({
+  boxRef,
+  hudRef,
+  speedoRef,
+  minimapRef,
+  mobileInputRef,
+  onCamToggleRef,
+  onResetRef,
+}: UseCarGameArgs) {
   useEffect(() => {
     const box = boxRef.current;
     const hud = hudRef.current;
@@ -128,7 +142,12 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
     if (!box || !hud || !speedo || !minimap) return;
 
+    const carAudio = new CarAudio();
     const car: CarState = { x: SPAWN.x, y: SPAWN.y, heading: SPAWN.heading, speed: 0 };
+    let terrainManager: TerrainManager | null = null;
+    let currentGroundY = 0;
+    let carPitch = 0;
+    let carRoll = 0;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(SKY);
@@ -140,11 +159,29 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
     sun.position.set(300, 800, 200);
     scene.add(sun);
 
-    const camera = new THREE.PerspectiveCamera(70, RESOLUTION.width / RESOLUTION.height, 0.1, 10000);
+    const initialWidth = box.clientWidth || RESOLUTION.width;
+    const initialHeight = box.clientHeight || RESOLUTION.height;
+    const camera = new THREE.PerspectiveCamera(70, initialWidth / initialHeight, 0.1, 10000);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(RESOLUTION.width, RESOLUTION.height);
+    renderer.setSize(initialWidth, initialHeight);
     box.appendChild(renderer.domElement);
+
+    const updateSize = () => {
+      const w = box.clientWidth;
+      const h = box.clientHeight;
+      if (w > 0 && h > 0) {
+        renderer.setSize(w, h);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+    };
+    updateSize();
+
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(box);
+    window.addEventListener('resize', updateSize);
+    window.addEventListener('orientationchange', updateSize);
 
     const spawnMarker = new THREE.Mesh(
       new THREE.RingGeometry(18, 26, 32),
@@ -216,15 +253,26 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
           groundMaterial.map.colorSpace = THREE.SRGBColorSpace;
         }
 
-        const ground = new THREE.Mesh(new THREE.PlaneGeometry(c.width, c.height), groundMaterial);
+        const groundGeom = terrainManager
+          ? terrainManager.buildChunkFloorGeometry(c, 48)
+          : new THREE.PlaneGeometry(c.width, c.height);
+
+        const ground = new THREE.Mesh(groundGeom, groundMaterial);
         ground.rotation.x = -Math.PI / 2;
-        ground.position.set(c.x + c.width / 2, -0.1, c.y + c.height / 2);
+        ground.position.set(c.x + c.width / 2, 0, c.y + c.height / 2);
         group.add(ground);
 
-        group.add(makeGrid(c));
+        if (terrainManager) {
+          group.add(terrainManager.buildChunkGrid(c));
+        } else {
+          group.add(makeGrid(c));
+        }
 
         const obj = gltf.scene;
         if (GLB_MIRROR_Z) obj.scale.z = -1;
+        if (terrainManager) {
+          terrainManager.elevateObjectVertices(obj, GLB_MIRROR_Z);
+        }
         obj.traverse((child) => {
           const mesh = child as THREE.Mesh;
           if (mesh.isMesh) {
@@ -281,18 +329,6 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
     const loadMapData = async () => {
       mapMeta = (await fetch(`${MAP_DIR}/map.json`).then((res) => res.json())) as MapMeta;
 
-      if (mapMeta.spawn) {
-        SPAWN.x = mapMeta.spawn.x;
-        SPAWN.y = mapMeta.spawn.y;
-        SPAWN.heading = mapMeta.spawn.heading ?? SPAWN.heading;
-        car.x = SPAWN.x;
-        car.y = SPAWN.y;
-        car.heading = SPAWN.heading;
-        car.speed = 0;
-        spawnMarker.position.set(SPAWN.x, 0.2, SPAWN.y);
-        camInit = false;
-      }
-
       chunks = (mapMeta.chunks ?? []).map((c) => ({
         ...c,
         state: 'idle',
@@ -302,6 +338,25 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
         imgReady: false,
         retryAt: 0,
       }));
+
+      terrainManager = new TerrainManager(mapMeta, chunks);
+      const spawnH = terrainManager.getHeight(SPAWN.x, SPAWN.y);
+      currentGroundY = spawnH;
+      spawnMarker.position.set(SPAWN.x, spawnH + 0.2, SPAWN.y);
+
+      if (mapMeta.spawn) {
+        SPAWN.x = mapMeta.spawn.x;
+        SPAWN.y = mapMeta.spawn.y;
+        SPAWN.heading = mapMeta.spawn.heading ?? SPAWN.heading;
+        car.x = SPAWN.x;
+        car.y = SPAWN.y;
+        car.heading = SPAWN.heading;
+        car.speed = 0;
+        const newSpawnH = terrainManager.getHeight(SPAWN.x, SPAWN.y);
+        currentGroundY = newSpawnH;
+        spawnMarker.position.set(SPAWN.x, newSpawnH + 0.2, SPAWN.y);
+        camInit = false;
+      }
 
       if (chunks.length > 0) {
         const minX = Math.min(...chunks.map((c) => c.x));
@@ -456,20 +511,32 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
       return { latitude, longitude };
     };
 
+    const toggleCam = () => {
+      topView = !topView;
+    };
+
+    const resetCar = () => {
+      car.x = SPAWN.x;
+      car.y = SPAWN.y;
+      car.heading = SPAWN.heading;
+      car.speed = 0;
+      currentGroundY = terrainManager ? terrainManager.getHeight(SPAWN.x, SPAWN.y) : 0;
+      carPitch = 0;
+      carRoll = 0;
+      updateChunks(0, true);
+    };
+
+    if (onCamToggleRef) onCamToggleRef.current = toggleCam;
+    if (onResetRef) onResetRef.current = resetCar;
+
     const onKeyDown = (event: KeyboardEvent) => {
       const k = event.key.toLowerCase();
       keys.add(k);
       if (event.key.startsWith('Arrow') || k === ' ') event.preventDefault();
 
-      if (k === 'c') topView = !topView;
+      if (k === 'c') toggleCam();
       if (k === '0') miniZoom = MINI_MAP_SCALE;
-      if (k === 'r') {
-        car.x = SPAWN.x;
-        car.y = SPAWN.y;
-        car.heading = SPAWN.heading;
-        car.speed = 0;
-        updateChunks(0, true);
-      }
+      if (k === 'r') resetCar();
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
@@ -480,11 +547,15 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
     document.addEventListener('keyup', onKeyUp);
 
     const updateCar = (dt: number) => {
-      const gas = down('w', 'arrowup');
-      const rev = down('s', 'arrowdown');
-      const left = down('a', 'arrowleft');
-      const right = down('d', 'arrowright');
-      const hand = down(' ');
+      const mobileInput = mobileInputRef?.current;
+      const mobileSteer = mobileInput?.steer ?? 0;
+      const mobileGas = Boolean(mobileInput?.gas || (mobileInput?.throttle ?? 0) > 0.15);
+      const mobileRev = Boolean(mobileInput?.rev || (mobileInput?.throttle ?? 0) < -0.15);
+      const mobileHand = Boolean(mobileInput?.hand);
+
+      const gas = down('w', 'arrowup') || mobileGas;
+      const rev = down('s', 'arrowdown') || mobileRev;
+      const hand = down(' ') || mobileHand;
 
       if (gas) {
         car.speed += (car.speed < 0 ? CAR.brake : CAR.accel) * dt;
@@ -506,7 +577,9 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
       // Di sistem y-down, heading naik = putar ke kanan (searah jarum jam),
       // jadi tanda steer dibalik supaya A/← tetap belok kiri.
-      const steer = (right ? 1 : 0) - (left ? 1 : 0);
+      const keySteer = (down('d', 'arrowright') ? 1 : 0) - (down('a', 'arrowleft') ? 1 : 0);
+      // Support continuous analog steering from mobile joystick
+      const steer = Math.abs(mobileSteer) > 0.05 ? mobileSteer : keySteer;
       const grip = Math.min(1, Math.abs(car.speed) / 80);
       car.heading += steer * CAR.turnRate * grip * Math.sign(car.speed) * dt;
 
@@ -521,14 +594,32 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
       if (hit) car.speed *= -0.25;
 
-      carGroup.position.set(car.x, 0, car.y);
-      // Maju mobil = +x lokal; di dunia arahnya (cos h, 0, sin h) => rotation.y = -heading.
+      // Follow terrain height and surface slope
+      if (terrainManager) {
+        const targetGroundY = terrainManager.getHeight(car.x, car.y);
+        currentGroundY = THREE.MathUtils.lerp(currentGroundY, targetGroundY, Math.min(1, dt * 20));
+
+        const slope = terrainManager.getVehicleSlope(car.x, car.y, car.heading);
+        carPitch = THREE.MathUtils.lerp(carPitch, slope.pitch, Math.min(1, dt * 14));
+        carRoll = THREE.MathUtils.lerp(carRoll, slope.roll, Math.min(1, dt * 14));
+      }
+
+      carGroup.position.set(car.x, currentGroundY, car.y);
+      carGroup.rotation.order = 'YXZ';
       carGroup.rotation.y = -car.heading;
+      carGroup.rotation.z = carPitch;
+      carGroup.rotation.x = carRoll;
 
       // Update 3D car model animation (front wheel steering, 4-wheel rotation, dynamic brake lights)
-      const steerInput = (left ? 1 : 0) - (right ? 1 : 0);
+      const steerWheelInput =
+        Math.abs(mobileSteer) > 0.05
+          ? -mobileSteer
+          : (down('a', 'arrowleft') ? 1 : 0) - (down('d', 'arrowright') ? 1 : 0);
       const isBraking = Boolean(rev || hand);
-      loadedCar?.update(dt, car.speed, steerInput, isBraking);
+      loadedCar?.update(dt, car.speed, steerWheelInput, isBraking);
+
+      // Real-time dynamic engine audio
+      carAudio.update(dt, car.speed, CAR.maxSpeed, Boolean(gas), isBraking);
     };
 
     const camPos = new THREE.Vector3();
@@ -539,16 +630,17 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
       const fz = Math.sin(car.heading);
       const cx = car.x;
       const cz = car.y;
+      const cy = currentGroundY;
 
       let targetPos: THREE.Vector3;
       let targetLook: THREE.Vector3;
 
       if (topView) {
-        targetPos = new THREE.Vector3(cx, TOP_HEIGHT, cz + 0.01);
-        targetLook = new THREE.Vector3(cx, 0, cz);
+        targetPos = new THREE.Vector3(cx, cy + TOP_HEIGHT, cz + 0.01);
+        targetLook = new THREE.Vector3(cx, cy, cz);
       } else {
-        targetPos = new THREE.Vector3(cx - fx * CHASE.distance, CHASE.height, cz - fz * CHASE.distance);
-        targetLook = new THREE.Vector3(cx + fx * CHASE.lookAhead, 10, cz + fz * CHASE.lookAhead);
+        targetPos = new THREE.Vector3(cx - fx * CHASE.distance, cy + CHASE.height, cz - fz * CHASE.distance);
+        targetLook = new THREE.Vector3(cx + fx * CHASE.lookAhead, cy + 10, cz + fz * CHASE.lookAhead);
       }
 
       if (!camInit) {
@@ -578,11 +670,12 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 				<strong>CAR DEBUG</strong><br>
 				Map X: ${car.x.toFixed(1)}<br>
 				Map Y: ${car.y.toFixed(1)}<br>
+				Elevation: ${currentGroundY.toFixed(1)} m<br>
 				Latitude: ${geo.latitude.toFixed(8)}<br>
 				Longitude: ${geo.longitude.toFixed(8)}<br>
 				Heading: ${THREE.MathUtils.radToDeg(car.heading % (Math.PI * 2)).toFixed(0)}°<br>
 				Chunk: ${loaded}/${chunks.length} aktif${loading ? ` (+${loading} loading)` : ''}<br>
-				<small>W/↑ gas, S/↓ rem/mundur, A/D atau ←/→ belok<br>
+				<small>W/↑ gas, S/↓ rem/mundur, A/D belok<br>
 				Space handbrake, C ganti kamera, R reset<br>
 				+ / - zoom minimap (tahan), 0 reset zoom</small>
 			`;
@@ -612,6 +705,10 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
       cancelAnimationFrame(animationId);
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateSize);
+      window.removeEventListener('orientationchange', updateSize);
+      carAudio.dispose();
 
       for (const c of chunks) {
         unloadChunk(c);
@@ -633,5 +730,5 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
         box.removeChild(renderer.domElement);
       }
     };
-  }, [boxRef, hudRef, speedoRef, minimapRef]);
+  }, [boxRef, hudRef, speedoRef, minimapRef, mobileInputRef, onCamToggleRef, onResetRef]);
 }
