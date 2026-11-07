@@ -8,6 +8,8 @@ import {
   CHUNK_CHECK_INTERVAL,
   CHUNK_LOAD_DISTANCE,
   CHUNK_UNLOAD_MARGIN,
+  first_chunk,
+  last_chunk,
   MAP_DIR,
   MINI_MAP_HEIGHT,
   MINI_MAP_ROTATE,
@@ -17,6 +19,7 @@ import {
   MINI_ZOOM_MAX,
   MINI_ZOOM_MIN,
   MINI_ZOOM_SPEED,
+  RENDER_FLOOR,
   RESOLUTION,
   SKY,
   SPAWN,
@@ -185,9 +188,11 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
     scene.add(carGroup);
 
     const loader = new GLTFLoader();
+    const textureLoader = new THREE.TextureLoader();
     let mapMeta: MapMeta | null = null;
     let chunks: RuntimeChunk[] = [];
     let obstacles: Obstacle[] = [];
+    let mapBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
     let chunkTimer = 0;
 
@@ -214,10 +219,17 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
         const group = new THREE.Group();
 
-        const ground = new THREE.Mesh(
-          new THREE.PlaneGeometry(c.width, c.height),
-          new THREE.MeshStandardMaterial({ color: 0xdddddd }),
-        );
+        const groundMaterial = RENDER_FLOOR
+          ? new THREE.MeshStandardMaterial({
+              map: textureLoader.load(`${MAP_DIR}/${c.image}`),
+            })
+          : new THREE.MeshStandardMaterial({ color: 0xdddddd });
+
+        if (RENDER_FLOOR && groundMaterial.map) {
+          groundMaterial.map.colorSpace = THREE.SRGBColorSpace;
+        }
+
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(c.width, c.height), groundMaterial);
         ground.rotation.x = -Math.PI / 2;
         ground.position.set(c.x + c.width / 2, -0.1, -(c.y + c.height / 2));
         group.add(ground);
@@ -302,6 +314,14 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
         imgReady: false,
         retryAt: 0,
       }));
+
+      if (chunks.length > 0) {
+        const minX = Math.min(...chunks.map((c) => c.x));
+        const maxX = Math.max(...chunks.map((c) => c.x + c.width));
+        const minY = Math.min(...chunks.map((c) => c.y));
+        const maxY = Math.max(...chunks.map((c) => c.y + c.height));
+        mapBounds = { minX, maxX, minY, maxY };
+      }
 
       obstacles = (mapMeta.shapes ?? [])
         .filter((shape) => (shape.y_value ?? 0) < CAR_TOP)
@@ -430,6 +450,18 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
 
     const blocked = (px: number, py: number) => hitsObstacle(px, py, CAR.radius) || outOfBounds(px, py);
 
+    const getGeoPosition = () => {
+      const mapWidth = mapBounds.maxX - mapBounds.minX;
+      const mapHeight = mapBounds.maxY - mapBounds.minY;
+      const tX = mapWidth === 0 ? 0 : Math.max(0, Math.min(1, (car.x - mapBounds.minX) / mapWidth));
+      const tY = mapHeight === 0 ? 0 : Math.max(0, Math.min(1, (car.y - mapBounds.minY) / mapHeight));
+
+      const latitude = first_chunk.latitude + tY * (last_chunk.latitude - first_chunk.latitude);
+      const longitude = first_chunk.longitude + tX * (last_chunk.longitude - first_chunk.longitude);
+
+      return { latitude, longitude };
+    };
+
     const onKeyDown = (event: KeyboardEvent) => {
       const k = event.key.toLowerCase();
       keys.add(k);
@@ -540,11 +572,14 @@ export function useCarGame({ boxRef, hudRef, speedoRef, minimapRef }: UseCarGame
     const updateHud = () => {
       const loaded = chunks.filter((c) => c.state === 'loaded').length;
       const loading = chunks.filter((c) => c.state === 'loading').length;
+      const geo = getGeoPosition();
 
       hud.innerHTML = `
 				<strong>CAR DEBUG</strong><br>
 				Map X: ${car.x.toFixed(1)}<br>
 				Map Y: ${car.y.toFixed(1)}<br>
+				Latitude: ${geo.latitude.toFixed(8)}<br>
+				Longitude: ${geo.longitude.toFixed(8)}<br>
 				Heading: ${THREE.MathUtils.radToDeg(car.heading % (Math.PI * 2)).toFixed(0)}°<br>
 				Chunk: ${loaded}/${chunks.length} aktif${loading ? ` (+${loading} loading)` : ''}<br>
 				<small>W/↑ gas, S/↓ rem/mundur, A/D atau ←/→ belok<br>

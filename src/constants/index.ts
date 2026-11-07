@@ -17,6 +17,18 @@ export const MINI_MAP_ROTATE = true;
 
 export const MAP_DIR = '/map_objects';
 
+export const first_chunk = {
+  latitude: -6.920973741554146,
+  longitude: 107.5836181640625,
+} as const;
+
+export const last_chunk = {
+  latitude: -6.929153376172391,
+  longitude: 107.59185791015625,
+} as const;
+
+export const RENDER_FLOOR = true;
+
 export const SPAWN = { x: 0, y: 0, heading: Math.PI / 4 };
 
 export const CAR = {
